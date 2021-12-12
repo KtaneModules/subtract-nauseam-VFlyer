@@ -1,1 +1,1 @@
-# add-nauseam
+#[ModKit Wiki](../../wiki)
