@@ -84,11 +84,11 @@ public class SubtractNauseamScript : MonoBehaviour {
 					HandleHighlightAnswer();
 			};
 		}
+		GenerateStuff();
 	}
 	void QuickLog(string value, params object[] args)
 	{
-		if (!modSolved)
-			Debug.LogFormat("[Subtract Nauseam #{0}] {1}", modID, string.Format(value, args));
+		Debug.LogFormat("[Subtract Nauseam #{0}] {1}", modID, string.Format(value, args));
 	}
 	void CreateCurQuestion()
 	{
@@ -170,7 +170,7 @@ public class SubtractNauseamScript : MonoBehaviour {
 			}
 			else
 			{
-				QuickLog("Direction {0} was pressed on question #{1}. That's not it...", debugDirections[idxDirectionPressed], curQuestionIdx + 1);
+				QuickLog("Direction {0} was incorrectly pressed on prompt #{1}.", debugDirections[idxDirectionPressed], curQuestionIdx + 1);
 				mAudio.PlayGameSoundAtTransform(KMSoundOverride.SoundEffect.ButtonPress, directionsSelectable[idxDirectionPressed].transform);
 				ResetModule();
 			}
@@ -187,6 +187,7 @@ public class SubtractNauseamScript : MonoBehaviour {
 					{
 						modSolved = true;
 						modSelf.HandlePass();
+						QuickLog("At this point, the module has been disarmed. Further attempts will be logged underneath this, with fake strikes only being noted.");
 					}
 					if (allResults.Any() || Random.value > 0.2f)
 						mAudio.PlaySoundAtTransform("Good", transform);
@@ -204,6 +205,7 @@ public class SubtractNauseamScript : MonoBehaviour {
 					lastAttemptsSubmittedFinalAnswer.Add(currentSubmissionIdx.ToArray());
 					*/
 					ShowStatus();
+					GenerateStuff();
 					hasStarted = false;
 				}
 				else
@@ -221,6 +223,132 @@ public class SubtractNauseamScript : MonoBehaviour {
 				statusMesh.text = currentSubmissionIdx.Select(a => a < 0 || a >= selectedCharacters.Length ? "-" : selectedCharacters.Substring(a, 1)).Join("");
 			}
 		}
+	}
+	void GenerateStuff()
+    {
+		if (generatedDirectionIdxes == null)
+			generatedDirectionIdxes = new int[10];
+		if (generatedIndividualDigits == null)
+			generatedIndividualDigits = new int[10];
+		if (expectedSubmissionIdx == null)
+			expectedSubmissionIdx = new int[4];
+		if (currentSubmissionIdx == null)
+			currentSubmissionIdx = new int[4];
+		if (directionInputDigits == null)
+			directionInputDigits = Enumerable.Range(0, 4).ToArray();
+		// Generate a pooled set of questions.
+		allQuestionIDxType = new[] { 0, 1, 1, 2, 3, 4, 5, 5, 5, 5 };
+		// 0: Q#, 1: ODD/EVEN, 2: MIN, 3: MAX, 4: Xo#, 5: #o#
+		do
+			allQuestionIDxType.Shuffle();
+		while (allQuestionIDxType.First() == 4);
+		for (var x = 0; x < allQuestionIDxType.Length; x++)
+		{
+			// Pregenerate all correct values on this module.
+			switch (allQuestionIDxType[x])
+			{
+				case 0:
+					generatedIndividualDigits[x] = (x + 1) % 10;
+					break;
+				case 1:
+					generatedIndividualDigits[x] = Enumerable.Range(0, 10).Where(a => a % 2 == allQuestionIDxType[x] % 2).PickRandom();
+					break;
+				case 2:
+					generatedIndividualDigits[x] = Random.Range(0, 7);
+					break;
+				case 3:
+					generatedIndividualDigits[x] = Random.Range(3, 10);
+					break;
+				default:
+					generatedIndividualDigits[x] = Random.Range(0, 10);
+					break;
+			}
+			// Pregenerate all correct directions on this module.
+			generatedDirectionIdxes[x] = Random.Range(0, 4);
+		}
+		QuickLog("Generated value sequence: {0}", generatedIndividualDigits.Join(", "));
+		QuickLog("Generated directions to press: {0}", generatedDirectionIdxes.Select(a => debugDirections[a]).Join(", "));
+		QuickLog("Generated question types: {0}", allQuestionIDxType.Select(a => debugQuestionType[a]).Join(", "));
+		var finalSum = generatedIndividualDigits.Sum();
+		for (var x = 0; x < 4; x++)
+		{
+			var curProduct = 1;
+			for (var y = 0; y < 3 - x; y++)
+				curProduct *= 3;
+			expectedSubmissionIdx[x] = finalSum / curProduct % 3;
+			currentSubmissionIdx[x] = -1;
+		}
+		QuickLog("The last 4 ternary digits of the sum of the generated value sequence ({1}) is: {0}", expectedSubmissionIdx.Join(""), finalSum);
+		directionInputDigits.Shuffle();
+		// Calculate the correct password for this module.
+		IEnumerable<int> outsideOffsets = new[] { 1, 5, 7, 3 };
+		outsideOffsets = outsideOffsets.Skip(generatedDirectionIdxes[0]).Concat(outsideOffsets.Take(generatedDirectionIdxes[0]));
+
+		var startColTL = 3;
+		var startRowTL = 3;
+		var appliedRulesIdx = new List<bool>();
+		var appliedDirectionsIdx = new List<int>();
+
+		for (var x = 0; x < 3; x++)
+		{
+			var cur3Directions = generatedDirectionIdxes.Skip(3 * x + 1).Take(3);
+			var _3DistinctDirections = cur3Directions.Distinct().Count() == cur3Directions.Count();
+			QuickLog("Direction set #{0}: {1} (3 {2} directions)", x + 1, cur3Directions.Select(a => debugDirections[a]).Join(", "), _3DistinctDirections ? "distinct" : "nondistinct");
+			appliedRulesIdx.Add(_3DistinctDirections);
+			var expectedDirectionToAdd = _3DistinctDirections ?
+				Enumerable.Range(0, 4).Except(cur3Directions).Single() :
+				Enumerable.Range(0, 4).Single(b => cur3Directions.Count(a => a == b) >= Enumerable.Range(0, 4).Max(c => cur3Directions.Count(d => d == c)));
+			QuickLog("Expected to move in this direction: {0}", debugDirections[expectedDirectionToAdd]);
+			if (x <= 0 || _3DistinctDirections || appliedRulesIdx[x - 1] || expectedDirectionToAdd != appliedDirectionsIdx[x - 1])
+				appliedDirectionsIdx.Add(expectedDirectionToAdd);
+			else
+			{
+				appliedDirectionsIdx.Add(-1);
+				QuickLog("However, the last set has 3 nondistinct directions, this set has 3 nondistinct directions, and both are expected to move in the same direction. This expected direction is to stay in place.");
+			}
+		}
+		QuickLog("Expected moves from the center: {0}", appliedDirectionsIdx.Where(a => Enumerable.Range(0, 4).Contains(a)).Select(a => debugDirections[a]).Join(", "));
+		foreach (int appliedDirection in appliedDirectionsIdx)
+		{
+			switch (appliedDirection)
+			{
+				case 0:
+					startRowTL--;
+					break;
+				case 1:
+					startColTL++;
+					break;
+				case 2:
+					startRowTL++;
+					break;
+				case 3:
+					startColTL--;
+					break;
+			}
+		}
+		QuickLog("This gives the obtained 3x3 portion of the grid:");
+		var stringObtainedCharacters = symbolsGrid.Skip(startRowTL).Take(3).Select(a => a.Substring(startColTL, 3)).Join("");
+		for (var x = 0; x < 3; x++)
+		{
+			QuickLog(stringObtainedCharacters.Substring(3 * x, 3));
+		}
+		var finalObtainedChars = outsideOffsets.Select(a => stringObtainedCharacters[a]).Concat(new[] { stringObtainedCharacters[4] });
+		QuickLog("Obtained characters: {0}", finalObtainedChars.Join(""));
+		var voidedChar = finalObtainedChars.PickRandom();
+		finalObtainedChars = finalObtainedChars.Where(a => a != voidedChar);
+		QuickLog("Characters present on the module: {0}", finalObtainedChars.Join(""));
+
+		var distinctSerialNoLetters = info.GetSerialNumberLetters().Distinct().Take(4);
+		//Debug.Log(afterModifiedChars.Join(""));
+		var orderedItems = Enumerable.Range(0, 4 - distinctSerialNoLetters.Count())
+			.Concat(
+			Enumerable.Range(0, distinctSerialNoLetters.Count()).OrderByDescending(a => distinctSerialNoLetters.ElementAt(a)).Select(a => a - distinctSerialNoLetters.Count() + 4)).ToArray();
+		//Debug.Log(Enumerable.Range(0, 4).Select(a => a.ToString() + ":" + orderedItems.ElementAt(a)).Join("|"));
+		selectedCharacters = Enumerable.Range(0, 4).Select(a => finalObtainedChars.ElementAt(orderedItems[a])).Join("");
+
+		QuickLog("After ordering the symbols in relation to the serial number letters, the symbols are represented by the following: [{0}]",
+			Enumerable.Range(0, 4).Select(a => a.ToString() + ": " + selectedCharacters[a]).Join("], ["));
+		QuickLog("Expected passcode to submit: {0}", expectedSubmissionIdx.Select(a => selectedCharacters[a]).Join(""));
 	}
 	void ResetModule()
 	{
@@ -248,6 +376,7 @@ public class SubtractNauseamScript : MonoBehaviour {
 		for (var x = 0; x < directionsText.Length; x++)
 			directionsText[x].text = "";
 		centerMesh.text = "";
+		GenerateStuff();
 		ShowStatus();
 	}
 	void HandlePressDuringStatus(int dirIdx)
@@ -346,74 +475,6 @@ public class SubtractNauseamScript : MonoBehaviour {
 		QuickLog("Time to submit a passcode.");
 		centerMesh.text = "";
 		statusMesh.text = "----";
-		IEnumerable<int> outsideOffsets = new[] { 1, 5, 7, 3 };
-		outsideOffsets = outsideOffsets.Skip(generatedDirectionIdxes[0]).Concat(outsideOffsets.Take(generatedDirectionIdxes[0]));
-
-		var startColTL = 3;
-		var startRowTL = 3;
-		var appliedRulesIdx = new List<bool>();
-		var appliedDirectionsIdx = new List<int>();
-
-		for (var x = 0; x < 3; x++)
-		{
-			var cur3Directions = generatedDirectionIdxes.Skip(3 * x + 1).Take(3);
-			var _3DistinctDirections = cur3Directions.Distinct().Count() == cur3Directions.Count();
-			QuickLog("Direction set #{0}: {1} (3 {2} directions)", x + 1, cur3Directions.Select(a => debugDirections[a]).Join(", "), _3DistinctDirections ? "distinct" : "nondistinct");
-			appliedRulesIdx.Add(_3DistinctDirections);
-			var expectedDirectionToAdd = _3DistinctDirections ?
-				Enumerable.Range(0, 4).Except(cur3Directions).Single() :
-				Enumerable.Range(0, 4).Single(b => cur3Directions.Count(a => a == b) >= Enumerable.Range(0, 4).Max(c => cur3Directions.Count(d => d == c)));
-			QuickLog("Expected to move in this direction: {0}", debugDirections[expectedDirectionToAdd]);
-			if (x <= 0 || _3DistinctDirections || appliedRulesIdx[x - 1] || expectedDirectionToAdd != appliedDirectionsIdx[x - 1])
-				appliedDirectionsIdx.Add(expectedDirectionToAdd);
-			else
-			{
-				appliedDirectionsIdx.Add(-1);
-				QuickLog("However, the last set has 3 nondistinct directions, this set has 3 nondistinct directions, and both are expected to move in the same direction. This expected direction is to stay in place.");
-			}
-		}
-		QuickLog("Expected moves from the center: {0}", appliedDirectionsIdx.Where(a => Enumerable.Range(0, 4).Contains(a)).Select(a => debugDirections[a]).Join(", "));
-		foreach (int appliedDirection in appliedDirectionsIdx)
-		{
-			switch (appliedDirection)
-			{
-				case 0:
-					startRowTL--;
-					break;
-				case 1:
-					startColTL++;
-					break;
-				case 2:
-					startRowTL++;
-					break;
-				case 3:
-					startColTL--;
-					break;
-			}
-		}
-		QuickLog("This gives the obtained 3x3 portion of the grid:");
-		var stringObtainedCharacters = symbolsGrid.Skip(startRowTL).Take(3).Select(a => a.Substring(startColTL, 3)).Join("");
-		for (var x = 0; x < 3; x++)
-		{
-			QuickLog(stringObtainedCharacters.Substring(3 * x, 3));
-		}
-		var finalObtainedChars = outsideOffsets.Select(a => stringObtainedCharacters[a]).Concat(new[] { stringObtainedCharacters[4] });
-		QuickLog("Obtained characters: {0}", finalObtainedChars.Join(""));
-		var voidedChar = finalObtainedChars.PickRandom();
-		finalObtainedChars = finalObtainedChars.Where(a => a != voidedChar);
-		QuickLog("Characters present on the module: {0}", finalObtainedChars.Join(""));
-
-		var distinctSerialNoLetters = info.GetSerialNumberLetters().Distinct().Take(4);
-		//Debug.Log(afterModifiedChars.Join(""));
-		var orderedItems = Enumerable.Range(0, 4 - distinctSerialNoLetters.Count())
-			.Concat(
-			Enumerable.Range(0, distinctSerialNoLetters.Count()).OrderByDescending(a => distinctSerialNoLetters.ElementAt(a)).Select(a => a - distinctSerialNoLetters.Count() + 4)).ToArray();
-        //Debug.Log(Enumerable.Range(0, 4).Select(a => a.ToString() + ":" + orderedItems.ElementAt(a)).Join("|"));
-		selectedCharacters = Enumerable.Range(0, 4).Select(a => finalObtainedChars.ElementAt(orderedItems[a])).Join("");
-		
-		QuickLog("After ordering the symbols in relation to the serial number letters, the symbols are represented by the following: [{0}]",
-			Enumerable.Range(0, 4).Select(a => a.ToString() + ":" + selectedCharacters[a]).Join("],["));
-		QuickLog("Expected passcode to submit: {0}", expectedSubmissionIdx.Select(a => selectedCharacters[a]).Join(""));
 		for (var x = 0; x < directionInputDigits.Length; x++)
 		{
 			directionsText[x].text = selectedCharacters.Substring(directionInputDigits[x], 1);
@@ -427,61 +488,8 @@ public class SubtractNauseamScript : MonoBehaviour {
 	}
 	void StartAttempt()
 	{
-
-		if (generatedDirectionIdxes == null)
-			generatedDirectionIdxes = new int[10];
-		if (generatedIndividualDigits == null)
-			generatedIndividualDigits = new int[10];
-		if (expectedSubmissionIdx == null)
-			expectedSubmissionIdx = new int[4];
-		if (currentSubmissionIdx == null)
-			currentSubmissionIdx = new int[4];
-		if (directionInputDigits == null)
-			directionInputDigits = Enumerable.Range(0, 4).ToArray();
-		// 0: Q#, 1: ODD, 2: MIN, 3: MAX, 4: Xo#, 5: #o#
 		lastHighlightedIdx = -1;
-		allQuestionIDxType = new[] { 0, 1, 1, 2, 3, 4, 5, 5, 5, 5 };
-		do
-			allQuestionIDxType.Shuffle();
-		while (allQuestionIDxType.First() == 4);
-		for (var x = 0; x < allQuestionIDxType.Length; x++)
-		{
-			// Pregenerate all correct values on this module.
-			switch (allQuestionIDxType[x])
-			{
-				case 0:
-					generatedIndividualDigits[x] = (x + 1) % 10;
-					break;
-				case 1:
-					generatedIndividualDigits[x] = Enumerable.Range(0, 10).Where(a => a % 2 == allQuestionIDxType[x] % 2).PickRandom();
-					break;
-				case 2:
-					generatedIndividualDigits[x] = Random.Range(0, 7);
-					break;
-				case 3:
-					generatedIndividualDigits[x] = Random.Range(3, 10);
-					break;
-				default:
-					generatedIndividualDigits[x] = Random.Range(0, 10);
-					break;
-			}
-			// Pregenerate all correct directions on this module.
-			generatedDirectionIdxes[x] = Random.Range(0, 4);
-		}
-		QuickLog("Generated value sequence: {0}", generatedIndividualDigits.Join(", "));
-		QuickLog("Generated directions to press: {0}", generatedDirectionIdxes.Select(a => debugDirections[a]).Join(", "));
-		QuickLog("Generated question types: {0}", allQuestionIDxType.Select(a => debugQuestionType[a]).Join(", "));
-		var finalSum = generatedIndividualDigits.Sum();
-		for (var x = 0; x < 4; x++)
-		{
-			var curProduct = 1;
-			for (var y = 0; y < 3 - x; y++)
-				curProduct *= 3;
-			expectedSubmissionIdx[x] = finalSum / curProduct % 3;
-			currentSubmissionIdx[x] = -1;
-		}
-		QuickLog("The last 4 ternary digits of the sum of the generated value sequence ({1}) is: {0}", expectedSubmissionIdx.Join(""), finalSum);
-		directionInputDigits.Shuffle();
+		showingPassword = false;
 		isAnimating = true;
 		timeTicker = CountTimeUp();
 		StartCoroutine(timeTicker);
@@ -540,6 +548,7 @@ public class SubtractNauseamScript : MonoBehaviour {
 		for (var x = curQuestionIdx; x < generatedDirectionIdxes.Length; x++)
         {
 			directionsSelectable[generatedDirectionIdxes[x]].OnInteract();
+			//yield return true;
 			yield return new WaitForSeconds(0.1f);
         }
 		while (!currentSubmissionIdx.SequenceEqual(expectedSubmissionIdx))
@@ -553,7 +562,7 @@ public class SubtractNauseamScript : MonoBehaviour {
         }
 		var idxsubDir = Enumerable.Range(0, 4).Single(a => directionInputDigits[a] == 3);
 		directionsSelectable[idxsubDir].OnInteract();
-		yield return new WaitForSeconds(0.1f);
+		//yield return new WaitForSeconds(0.1f);
 	}
 
 #pragma warning disable 414
@@ -585,12 +594,17 @@ public class SubtractNauseamScript : MonoBehaviour {
 		else
 		{
 			yield return null;
+			while (isAnimating)
+				yield return "trycancel";
 			directionsSelectable["URDL".IndexOf(command)].OnInteract();
-			while (!hasStarted)
-				yield return null;
+			if (isAnimating)
+				while (!hasStarted)
+					yield return "trycancel";
+			/*
 			yield return null;
 			if (curQuestionIdx >= 0 && curQuestionIdx <= 9)
 				yield return "sendtochat!f" + directionsSelectable;
+			*/
 		}
 	}
 }
