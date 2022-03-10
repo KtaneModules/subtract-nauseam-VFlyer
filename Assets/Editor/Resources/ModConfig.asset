@@ -11,14 +11,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 615501dbe4f3fe94fbf4b564abb10237, type: 3}
   m_Name: ModConfig
   m_EditorClassIdentifier: 
-  id: addNauseam
-  title: Add Nauseam
-  author: Speakingevil
-  description: 'Pop Quiz! I hope you''ve been studying.
+  id: addNauseamPracticeMod
+  title: Subtract Nauseam
+  author: Speakingevil, VFlyer
+  description: '[i]He made everyone do an open book test and forgot to add a deadline
+    for this.[/i]
 
 
-    Quickly respond to each of the promtps, taking note of the values and positions
-    of each correct answer to determine the correct passcode.'
+    Respond to each of the prompts, taking note of the values and positions of each
+    correct answer to determine the correct passcode.
+
+    This is a practice version of [url=https://steamcommunity.com/sharedfiles/filedetails/?id=2680868903]Add
+    Nauseam[/url] by SpeakingEvil with different calculations needed to disarm the
+    module.'
   version: 1.0
   outputFolder: build
   previewImage: {fileID: 2800000, guid: 4899e3b59a48d914dae4fd73a0f55e3e, type: 3}
