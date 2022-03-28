@@ -4,6 +4,8 @@ using UnityEngine;
 using System.Linq;
 using KModkit;
 using Random = UnityEngine.Random;
+using System.Text.RegularExpressions;
+
 public class SubtractNauseamScript : MonoBehaviour {
 
 	public KMSelectable[] directionsSelectable;
@@ -40,11 +42,11 @@ public class SubtractNauseamScript : MonoBehaviour {
 	List<int[]> lastAttemptsSubmittedFinalAnswer = new List<int[]>();
 	*/
 	float timeTaken;
-	bool hasStarted = false, isAnimating, firstActivation = false, modSolved = false, showingPassword = false;
+	bool hasStarted = false, isAnimating, firstActivation = false, modSolved = false, showingPassword = false, allowTPSayPrompt;
 	int[] generatedIndividualDigits, generatedDirectionIdxes, allQuestionIDxType, expectedSubmissionIdx, currentSubmissionIdx, directionInputDigits;
 	int curQuestionIdx = 0, lastHighlightedIdx = -1, curResultHighlightIdx;
 	string[] lastArrowDisplayedTexts;
-	string selectedCharacters = "0123";
+	string selectedCharacters = "0123", tpMessagePrompt;
 	IEnumerator timeTicker;
 	// Use this for initialization
 	void Start()
@@ -152,6 +154,7 @@ public class SubtractNauseamScript : MonoBehaviour {
 					directionsText[x].text = lastArrowDisplayedTexts[x];
 				HandleHighlightAnswer(lastHighlightedIdx);
 				QuickLog("Showing prompt \"{0}\" with following answers: {1}", possibleCenterText, Enumerable.Range(0, 4).Select(a => "[" + debugDirections[a] + ": " + lastArrowDisplayedTexts[a] + "]").Join(", "), curQuestionIdx + 1);
+                tpMessagePrompt = string.Format("Prompt: \"{0}\" Possible Answers: {1}", possibleCenterText, Enumerable.Range(0, 4).Select(a => "[" + debugDirections[a].First() + ": " + lastArrowDisplayedTexts[a] + "]").Join(", "));
 				break;
 		}
 	}
@@ -189,7 +192,7 @@ public class SubtractNauseamScript : MonoBehaviour {
 						modSelf.HandlePass();
 						QuickLog("At this point, the module has been disarmed. Further attempts will be logged underneath this, with fake strikes only being noted.");
 					}
-					if (allResults.Any() || Random.value > 0.2f)
+					if (allResults.Any() || Random.value > 0.2f || timeTaken >= 80f)
 						mAudio.PlaySoundAtTransform("Good", transform);
 					else
 						mAudio.PlaySoundAtTransform("Best", transform);
@@ -197,13 +200,6 @@ public class SubtractNauseamScript : MonoBehaviour {
 					var subResult = new Result(true, timeTaken, curQuestionIdx, expectedSubmissionIdx.ToArray(), currentSubmissionIdx.ToArray());
 					allResults.Add(subResult);
 					curResultHighlightIdx = allResults.Count - 1;
-					/*
-					lastAttemptsSuccessful.Add(true);
-					lastAttemptsTimeTaken.Add(timeTaken);
-					lastAttemptsQuestionsAnswered.Add(curQuestionIdx);
-					lastAttemptsExpectedFinalAnswer.Add(expectedSubmissionIdx.ToArray());
-					lastAttemptsSubmittedFinalAnswer.Add(currentSubmissionIdx.ToArray());
-					*/
 					ShowStatus();
 					GenerateStuff();
 					hasStarted = false;
@@ -356,7 +352,7 @@ public class SubtractNauseamScript : MonoBehaviour {
 		if (!modSolved)
 		{
 			modSelf.HandleStrike();
-			if (allResults.Count(a => !a.isSuccessful) >= 5)
+			if (allResults.Count(a => !a.isSuccessful) >= 3)
 				mAudio.PlaySoundAtTransform("Vom", transform);
 		}
 		else
@@ -366,13 +362,6 @@ public class SubtractNauseamScript : MonoBehaviour {
 		var subResult = new Result(false, timeTaken, curQuestionIdx, expectedSubmissionIdx.ToArray(), curQuestionIdx >= 10 ? currentSubmissionIdx.ToArray() : null);
 		allResults.Add(subResult);
 		curResultHighlightIdx = allResults.Count - 1;
-		/*
-		lastAttemptsSuccessful.Add(false);
-		lastAttemptsTimeTaken.Add(timeTaken);
-		lastAttemptsQuestionsAnswered.Add(curQuestionIdx);
-		lastAttemptsExpectedFinalAnswer.Add(expectedSubmissionIdx.ToArray());
-		lastAttemptsSubmittedFinalAnswer.Add(curQuestionIdx >= 10 ? currentSubmissionIdx.ToArray() : null);
-		*/
 		for (var x = 0; x < directionsText.Length; x++)
 			directionsText[x].text = "";
 		centerMesh.text = "";
@@ -479,6 +468,7 @@ public class SubtractNauseamScript : MonoBehaviour {
 		{
 			directionsText[x].text = selectedCharacters.Substring(directionInputDigits[x], 1);
 		}
+		tpMessagePrompt = string.Format("Prompt is empty. Showing the following: {0}", Enumerable.Range(0, 4).Select(a => "[" + debugDirections[a].First() + ": " + selectedCharacters[a] + "]").Join(" "));
 	}
 
 	void HandleHighlightAnswer(int idx = -1)
@@ -566,29 +556,67 @@ public class SubtractNauseamScript : MonoBehaviour {
 	}
 
 #pragma warning disable 414
-	private readonly string TwitchHelpMessage = "!{0} U/L/R/D [Presses directional button. Presses can be chained when entering the passcode.]";
+	private readonly string BaseTwitchHelpMessage = "\"!{0} U/L/R/D\" [Presses directional button. Presses can be chained when entering the passcode.] \"!{0} prompt enable/disable/on/off/toggle\" [Enables/disables/toggles sending a message to chat for the current prompt.]";
+	private string TwitchHelpMessage = "\"!{0} U/L/R/D\" [Presses directional button. Presses can be chained when entering the passcode.] \"!{0} prompt enable/disable/on/off/toggle\" [Enables/disables/toggles sending a message to chat for the current prompt.]";
 #pragma warning restore 414
 
 	private IEnumerator ProcessTwitchCommand(string command)
 	{
-		command = command.ToUpperInvariant().Replace(" ", "");
-		if (command.Any(x => !"URDL".Contains(x.ToString())))
+		var matchPrompt = Regex.Match(command, @"^prompts?\s(on|off|toggle|enable|disable)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+		if (matchPrompt.Success)
+        {
+			var lastPortions = matchPrompt.Value.Split().Skip(1);
+			var portionSetLast = lastPortions.Single().ToUpperInvariant();
+			switch (portionSetLast)
+            {
+				case "ON":
+				case "ENABLE":
+					{
+						allowTPSayPrompt = true;
+						yield return "sendtochat Chat Prompts have been enabled. Check the chat when you start a new attempt.";
+						break;
+					}
+				case "OFF":
+				case "DISABLE":
+					{
+						allowTPSayPrompt = false;
+						yield return "sendtochat Chat Prompts have been disabled.";
+						break;
+					}
+				case "TOGGLE":
+                    {
+						allowTPSayPrompt ^= true;
+                        yield return "sendtochat Chat Prompts have been toggled" + (allowTPSayPrompt ? "on" : "off") + ".";
+						break;
+					}
+				default:
+                    {
+						yield return "sendtochaterror Unknown prompt command \"" + portionSetLast + "\"";
+						break;
+                    }
+            }
+			TwitchHelpMessage = BaseTwitchHelpMessage + (allowTPSayPrompt ? " The module will send a message regarding the current prompt being enabled." : "");
+			yield break;
+        }
+		var commandModified = command.ToUpperInvariant().Replace(" ", "");
+		if (commandModified.Any(x => !"URDL".Contains(x.ToString())))
 		{
 			yield return "sendtochaterror Only U, L, R, and D or valid commands.";
 			yield break;
 		}
-		if (command.Length > 1 && curQuestionIdx <= 9)
+		if (commandModified.Length > 1 && curQuestionIdx <= 9)
 		{
 			yield return "sendtochaterror Only one answer to a prompt may be sent at a time.";
 			yield break;
 		}
 		if (curQuestionIdx > 9)
 		{
-			int[] p = command.Select(x => "URDL".IndexOf(x.ToString())).ToArray();
+			int[] p = commandModified.Select(x => "URDL".IndexOf(x.ToString())).ToArray();
 			for (int i = 0; i < p.Length; i++)
 			{
 				yield return null;
 				directionsSelectable[p[i]].OnInteract();
+				if (directionInputDigits[p[i]] == 3) yield break;
 			}
 		}
 		else
@@ -596,15 +624,15 @@ public class SubtractNauseamScript : MonoBehaviour {
 			yield return null;
 			while (isAnimating)
 				yield return "trycancel";
-			directionsSelectable["URDL".IndexOf(command)].OnInteract();
+			directionsSelectable["URDL".IndexOf(commandModified)].OnInteract();
 			if (isAnimating)
 				while (!hasStarted)
 					yield return "trycancel";
-			/*
+			
 			yield return null;
-			if (curQuestionIdx >= 0 && curQuestionIdx <= 9)
-				yield return "sendtochat!f" + directionsSelectable;
-			*/
+			if (hasStarted && allowTPSayPrompt)
+				yield return "sendtochat " + tpMessagePrompt ?? "";
+			
 		}
 	}
 }
