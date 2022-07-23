@@ -19,15 +19,18 @@ public class SubtractNauseamScript : MonoBehaviour {
 		debugQuestionType = { "Q#", "ODD/EVEN", "MIN", "MAX", "Xo#", "#o#" },
 		directionSymbols = { "\u2191", "\u2192", "\u2193", "\u2190" };
 	static readonly string[] symbolsGrid = {
-		"----$----",
-		"---&£#---",
-		"--£#%$&--",
-		"-#%$&£#%-",
-		"%$&£#%$&£",
-		"-£#%$&£#-",
-		"--$&£#%--",
-		"---#%$---",
-		"----&----",
+		"-----£%-----",
+		"----#$&£----",
+		"---$&£#%$---",
+		"--£#%&$&£%--",
+		"-&$&£#%#$&£-",
+		"£#%#$&£&%#$&",
+		"$&£&%#$#£&%£",
+		"-%$#£&%&$#$-",
+		"--%&$#£#%&--",
+		"---£%&$&£---",
+		"----$#%#----",
+		"-----&$-----",
 	};
 
 
@@ -42,12 +45,46 @@ public class SubtractNauseamScript : MonoBehaviour {
 	List<int[]> lastAttemptsSubmittedFinalAnswer = new List<int[]>();
 	*/
 	float timeTaken;
-	bool hasStarted = false, isAnimating, firstActivation = false, modSolved = false, showingPassword = false, allowTPSayPrompt;
+	bool hasStarted = false, isAnimating, firstActivation = false, modSolved = false, showingPassword = false, allowTPSayPrompt, TwitchPlaysActive;
 	int[] generatedIndividualDigits, generatedDirectionIdxes, allQuestionIDxType, expectedSubmissionIdx, currentSubmissionIdx, directionInputDigits;
 	int curQuestionIdx = 0, lastHighlightedIdx = -1, curResultHighlightIdx;
 	string[] lastArrowDisplayedTexts;
-	string selectedCharacters = "0123", tpMessagePrompt;
+	string selectedCharacters = "0123";
 	IEnumerator timeTicker;
+
+	private IDictionary<string, object> tpAPI;
+	void TrySendMessage(string message, params object[] args)
+    {
+		if (TwitchPlaysActive && allowTPSayPrompt)
+		{
+			if (tpAPI == null)
+			{
+				GameObject tpAPIGameObject = GameObject.Find("TwitchPlays_Info");
+				//To make the module can be tested in test harness, check if the gameObject exists.
+				if (tpAPIGameObject != null)
+					tpAPI = tpAPIGameObject.GetComponent<IDictionary<string, object>>();
+				else
+					return;
+			}
+			tpAPI["ircConnectionSendMessage"] = string.Format(message, args);
+		}
+	}
+	private string GetModuleCode()
+	{
+		Transform closest = null;
+		float closestDistance = float.MaxValue;
+		foreach (Transform children in transform.parent)
+		{
+			var distance = (transform.position - children.position).magnitude;
+			if (children.gameObject.name == "TwitchModule(Clone)" && (closest == null || distance < closestDistance))
+			{
+				closest = children;
+				closestDistance = distance;
+			}
+		}
+
+		return closest != null ? closest.Find("MultiDeckerUI").Find("IDText").GetComponent<UnityEngine.UI.Text>().text : null;
+	}
 	// Use this for initialization
 	void Start()
 	{
@@ -138,9 +175,17 @@ public class SubtractNauseamScript : MonoBehaviour {
 						string.Format("{0}+{1}", curCorrectValue - modifier, modifier),
 						string.Format("{0}/{1}", curCorrectValue * modifier, modifier),
 						string.Format("{0}-{1}", curCorrectValue + modifier, modifier),
+						//string.Format("{0}*{1}", curCorrectValue / modifier, modifier)
 					};
-					var selectedIdxPossible = Enumerable.Range(0, 3).Where(a => a != 0 || curCorrectValue - modifier > 0);
-					possibleCenterText = possibleExpressions[selectedIdxPossible.PickRandom()];
+					var possibleValues = Enumerable.Range(0, 3).ToList();
+					if (curCorrectValue - modifier <= 0)
+						possibleValues.Remove(0);
+					/*
+					if (curCorrectValue % modifier != 0)
+						possibleValues.Remove(3);
+					*/
+					var selectedIdxPossible = possibleValues.PickRandom();
+					possibleCenterText = possibleExpressions[selectedIdxPossible];
 				}
 				goto default;
 			default:
@@ -154,7 +199,7 @@ public class SubtractNauseamScript : MonoBehaviour {
 					directionsText[x].text = lastArrowDisplayedTexts[x];
 				HandleHighlightAnswer(lastHighlightedIdx);
 				QuickLog("Showing prompt \"{0}\" with following answers: {1}", possibleCenterText, Enumerable.Range(0, 4).Select(a => "[" + debugDirections[a] + ": " + lastArrowDisplayedTexts[a] + "]").Join(", "), curQuestionIdx + 1);
-                tpMessagePrompt = string.Format("Prompt: \"{0}\" Possible Answers: {1}", possibleCenterText, Enumerable.Range(0, 4).Select(a => "[" + debugDirections[a].First() + ": " + lastArrowDisplayedTexts[a] + "]").Join(", "));
+                TrySendMessage("Subtract Nauseum #{2} is showing the following prompt: \"{0}\", with the possible choices: {1}", possibleCenterText, Enumerable.Range(0, 4).Select(a => "[" + debugDirections[a].First() + ": " + lastArrowDisplayedTexts[a] + "]").Join(", "), GetModuleCode());
 				break;
 		}
 	}
@@ -238,6 +283,12 @@ public class SubtractNauseamScript : MonoBehaviour {
 		do
 			allQuestionIDxType.Shuffle();
 		while (allQuestionIDxType.First() == 4);
+		var directionsFixed = new int[Random.Range(4, 6)];
+		for (var x = 0; x < directionsFixed.Length; x++)
+        {
+			// Pregenerate all correct directions on this module.
+			directionsFixed[x] = Random.Range(0, 4);
+		}
 		for (var x = 0; x < allQuestionIDxType.Length; x++)
 		{
 			// Pregenerate all correct values on this module.
@@ -259,9 +310,34 @@ public class SubtractNauseamScript : MonoBehaviour {
 					generatedIndividualDigits[x] = Random.Range(0, 10);
 					break;
 			}
-			// Pregenerate all correct directions on this module.
-			generatedDirectionIdxes[x] = Random.Range(0, 4);
+			
 		}
+
+		var finalDirectionsSet = new List<int>();
+		for (var x = 0; x < directionsFixed.Length; x++)
+		{
+			for (var i = 0; i < 2; i++)
+			{
+				finalDirectionsSet.Add(directionsFixed[x]);
+			}
+		}
+
+		while (finalDirectionsSet.Count < 10)
+        {
+			var isHorizontalCancel = Random.value < 0.5f;
+			if (isHorizontalCancel)
+            {
+				finalDirectionsSet.Add(0);
+				finalDirectionsSet.Add(2);
+			}
+			else
+			{
+				finalDirectionsSet.Add(1);
+				finalDirectionsSet.Add(3);
+			}
+		}
+		finalDirectionsSet.Shuffle();
+		generatedDirectionIdxes = finalDirectionsSet.ToArray().Shuffle();
 		QuickLog("Generated value sequence: {0}", generatedIndividualDigits.Join(", "));
 		QuickLog("Generated directions to press: {0}", generatedDirectionIdxes.Select(a => debugDirections[a]).Join(", "));
 		QuickLog("Generated question types: {0}", allQuestionIDxType.Select(a => debugQuestionType[a]).Join(", "));
@@ -277,62 +353,22 @@ public class SubtractNauseamScript : MonoBehaviour {
 		QuickLog("The last 4 ternary digits of the sum of the generated value sequence ({1}) is: {0}", expectedSubmissionIdx.Join(""), finalSum);
 		directionInputDigits.Shuffle();
 		// Calculate the correct password for this module.
-		IEnumerable<int> outsideOffsets = new[] { 1, 5, 7, 3 };
-		outsideOffsets = outsideOffsets.Skip(generatedDirectionIdxes[0]).Concat(outsideOffsets.Take(generatedDirectionIdxes[0]));
 
-		var startColTL = 3;
-		var startRowTL = 3;
-		var appliedRulesIdx = new List<bool>();
-		var appliedDirectionsIdx = new List<int>();
-
-		for (var x = 0; x < 3; x++)
-		{
-			var cur3Directions = generatedDirectionIdxes.Skip(3 * x + 1).Take(3);
-			var _3DistinctDirections = cur3Directions.Distinct().Count() == cur3Directions.Count();
-			QuickLog("Direction set #{0}: {1} (3 {2} directions)", x + 1, cur3Directions.Select(a => debugDirections[a]).Join(", "), _3DistinctDirections ? "distinct" : "nondistinct");
-			appliedRulesIdx.Add(_3DistinctDirections);
-			var expectedDirectionToAdd = _3DistinctDirections ?
-				Enumerable.Range(0, 4).Except(cur3Directions).Single() :
-				Enumerable.Range(0, 4).Single(b => cur3Directions.Count(a => a == b) >= Enumerable.Range(0, 4).Max(c => cur3Directions.Count(d => d == c)));
-			QuickLog("Expected to move in this direction: {0}", debugDirections[expectedDirectionToAdd]);
-			if (x <= 0 || _3DistinctDirections || appliedRulesIdx[x - 1] || expectedDirectionToAdd != appliedDirectionsIdx[x - 1])
-				appliedDirectionsIdx.Add(expectedDirectionToAdd);
-			else
-			{
-				appliedDirectionsIdx.Add(-1);
-				QuickLog("However, the last set has 3 nondistinct directions, this set has 3 nondistinct directions, and both are expected to move in the same direction. This expected direction is to stay in place.");
-			}
-		}
-		QuickLog("Expected moves from the center: {0}", appliedDirectionsIdx.Where(a => Enumerable.Range(0, 4).Contains(a)).Select(a => debugDirections[a]).Join(", "));
-		foreach (int appliedDirection in appliedDirectionsIdx)
-		{
-			switch (appliedDirection)
-			{
-				case 0:
-					startRowTL--;
-					break;
-				case 1:
-					startColTL++;
-					break;
-				case 2:
-					startRowTL++;
-					break;
-				case 3:
-					startColTL--;
-					break;
-			}
-		}
-		QuickLog("This gives the obtained 3x3 portion of the grid:");
-		var stringObtainedCharacters = symbolsGrid.Skip(startRowTL).Take(3).Select(a => a.Substring(startColTL, 3)).Join("");
-		for (var x = 0; x < 3; x++)
-		{
-			QuickLog(stringObtainedCharacters.Substring(3 * x, 3));
-		}
-		var finalObtainedChars = outsideOffsets.Select(a => stringObtainedCharacters[a]).Concat(new[] { stringObtainedCharacters[4] });
-		QuickLog("Obtained characters: {0}", finalObtainedChars.Join(""));
-		var voidedChar = finalObtainedChars.PickRandom();
-		finalObtainedChars = finalObtainedChars.Where(a => a != voidedChar);
-		QuickLog("Characters present on the module: {0}", finalObtainedChars.Join(""));
+		var startColTL = 5;
+		var startRowTL = 5;
+		var offsetDirHoriz = directionsFixed.Count(a => a == 1) - directionsFixed.Count(a => a == 3);
+		var offsetDirVert = directionsFixed.Count(a => a == 2) - directionsFixed.Count(a => a == 0);
+		if (offsetDirHoriz != 0)
+			QuickLog("You should move {0} step{1} {2}.", Mathf.Abs(offsetDirHoriz), Mathf.Abs(offsetDirHoriz) == 1 ? "" : "s", offsetDirHoriz < 0 ? "left" : "right");
+		else
+			QuickLog("You should stay where you are horizontally.");
+		if (offsetDirVert != 0)
+			QuickLog("...Then move {0} step{1} {2}.", Mathf.Abs(offsetDirVert), Mathf.Abs(offsetDirVert) == 1 ? "" : "s", offsetDirVert < 0 ? "up" : "down");
+		else
+			QuickLog("...Then stay where you are vertically.");
+		var finalObtainedChars = symbolsGrid[startRowTL + offsetDirVert].Substring(startColTL + offsetDirHoriz, 2) + symbolsGrid[startRowTL + offsetDirVert + 1].Substring(startColTL + offsetDirHoriz, 2);
+		QuickLog("Obtained characters in reading order: {0}", finalObtainedChars.Join(""));
+		//QuickLog("Characters present on the module: {0}", finalObtainedChars.Join(""));
 
 		var distinctSerialNoLetters = info.GetSerialNumberLetters().Distinct().Take(4);
 		//Debug.Log(afterModifiedChars.Join(""));
@@ -352,7 +388,7 @@ public class SubtractNauseamScript : MonoBehaviour {
 		if (!modSolved)
 		{
 			modSelf.HandleStrike();
-			if (allResults.Count(a => !a.isSuccessful) >= 3)
+			if (allResults.Count(a => !a.isSuccessful) >= 2)
 				mAudio.PlaySoundAtTransform("Vom", transform);
 		}
 		else
@@ -468,7 +504,7 @@ public class SubtractNauseamScript : MonoBehaviour {
 		{
 			directionsText[x].text = selectedCharacters.Substring(directionInputDigits[x], 1);
 		}
-		tpMessagePrompt = string.Format("Prompt is empty. Showing the following: {0}", Enumerable.Range(0, 4).Select(a => "[" + debugDirections[a].First() + ": " + selectedCharacters[a] + "]").Join(" "));
+		TrySendMessage("Subtract Nauseum #{1} is showing an empty prompt with the following choices: {0}", Enumerable.Range(0, 4).Select(a => "[" + debugDirections[a].First() + ": " + selectedCharacters[a] + "]").Join(" "), GetModuleCode());
 	}
 
 	void HandleHighlightAnswer(int idx = -1)
@@ -535,6 +571,7 @@ public class SubtractNauseamScript : MonoBehaviour {
 		do
 			yield return true;
 		while (isAnimating);
+		allowTPSayPrompt = false; // Disable this to prevent chat flooding when autosolving.
 		for (var x = curQuestionIdx; x < generatedDirectionIdxes.Length; x++)
         {
 			directionsSelectable[generatedDirectionIdxes[x]].OnInteract();
@@ -625,13 +662,13 @@ public class SubtractNauseamScript : MonoBehaviour {
 			while (isAnimating)
 				yield return "trycancel";
 			directionsSelectable["URDL".IndexOf(commandModified)].OnInteract();
-			if (isAnimating)
-				while (!hasStarted)
-					yield return "trycancel";
+			//if (isAnimating)
+			//	while (!hasStarted)
+			//		yield return "trycancel";
 			
-			yield return null;
-			if (hasStarted && allowTPSayPrompt)
-				yield return "sendtochat " + tpMessagePrompt ?? "";
+			//yield return null;
+			//if (hasStarted && allowTPSayPrompt)
+			//	yield return "sendtochat " + tpMessagePrompt ?? "";
 			
 		}
 	}

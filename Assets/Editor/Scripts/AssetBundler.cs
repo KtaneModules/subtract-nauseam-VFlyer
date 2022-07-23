@@ -44,7 +44,7 @@ public class AssetBundler
     /// <summary>
     /// Folders which should not be included in the asset bundling process.
     /// </summary>
-    public static string[] EXCLUDED_FOLDERS = new string[] { "Assets/Editor", "Assets/TestHarness" };
+    public static string[] EXCLUDED_FOLDERS = new string[] { "Assets/Editor", "Assets/TestHarness", "Assets/DONOTCOMPILE" };
 
 
     #region Internal bundler Variables
@@ -258,6 +258,7 @@ public class AssetBundler
         }
 
         managedReferences.Add(unityAssembliesLocation + "UnityEngine");
+        managedReferences.Add(unityAssembliesLocation + "../UnityExtensions/Unity/GUISystem/UnityEngine.UI");
 
         //Next we need to grab some type references and use reflection to build things the way Unity does.
         //Note that EditorUtility.CompileCSharp will do *almost* exactly the same thing, but it unfortunately
