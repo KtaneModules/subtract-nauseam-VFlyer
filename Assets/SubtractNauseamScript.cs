@@ -45,14 +45,16 @@ public class SubtractNauseamScript : MonoBehaviour {
 	List<int[]> lastAttemptsSubmittedFinalAnswer = new List<int[]>();
 	*/
 	float timeTaken;
-	bool hasStarted = false, isAnimating, firstActivation = false, modSolved = false, showingPassword = false, allowTPSayPrompt, TwitchPlaysActive;
+	bool hasStarted = false, isAnimating, firstActivation = false, modSolved = false, showingPassword = false, storeAllResults = true, allowTPSayPrompt, TwitchPlaysActive;
 	int[] generatedIndividualDigits, generatedDirectionIdxes, allQuestionIDxType, expectedSubmissionIdx, currentSubmissionIdx, directionInputDigits;
-	int curQuestionIdx = 0, lastHighlightedIdx = -1, curResultHighlightIdx;
+	int curQuestionIdx = 0, lastHighlightedIdx = -1, curResultHighlightIdx, maxItemsStored, oopsCount;
 	string[] lastArrowDisplayedTexts;
 	string selectedCharacters = "0123";
 	IEnumerator timeTicker;
 
+	SubtractNauseamSettings localSettings = new SubtractNauseamSettings();
 	private IDictionary<string, object> tpAPI;
+
 	void TrySendMessage(string message, params object[] args)
     {
 		if (TwitchPlaysActive && allowTPSayPrompt)
@@ -85,6 +87,24 @@ public class SubtractNauseamScript : MonoBehaviour {
 
 		return closest != null ? closest.Find("MultiDeckerUI").Find("IDText").GetComponent<UnityEngine.UI.Text>().text : null;
 	}
+	void Awake()
+    {
+		try
+        {
+			var obtainedSettings = new ModConfig<SubtractNauseamSettings>("Subtract Nauseam Settings");
+			localSettings = obtainedSettings.Settings;
+			obtainedSettings.Settings = localSettings;
+			maxItemsStored = maxItemsStored == 0 ? 1 : localSettings.maxStoredResultsAll;
+			storeAllResults = !localSettings.storeSuccessfulResultsOnly;
+		}
+		catch
+        {
+			Debug.LogWarning("[Subtract Nauseam Settings] Settings do not work as intended! Using default settings!");
+			maxItemsStored = -1;
+			storeAllResults = true;
+        }
+    }
+
 	// Use this for initialization
 	void Start()
 	{
@@ -237,13 +257,12 @@ public class SubtractNauseamScript : MonoBehaviour {
 						modSelf.HandlePass();
 						QuickLog("At this point, the module has been disarmed. Further attempts will be logged underneath this, with fake strikes only being noted.");
 					}
-					if (allResults.Any() || Random.value > 0.2f || timeTaken >= 80f)
+					if (oopsCount > 0 || Random.value > 0.2f || timeTaken >= 80f)
 						mAudio.PlaySoundAtTransform("Good", transform);
 					else
 						mAudio.PlaySoundAtTransform("Best", transform);
 					StopCoroutine(timeTicker);
-					var subResult = new Result(true, timeTaken, curQuestionIdx, expectedSubmissionIdx.ToArray(), currentSubmissionIdx.ToArray());
-					allResults.Add(subResult);
+					StoreResult(true, timeTaken, curQuestionIdx, expectedSubmissionIdx.ToArray(), currentSubmissionIdx.ToArray());
 					curResultHighlightIdx = allResults.Count - 1;
 					ShowStatus();
 					GenerateStuff();
@@ -363,9 +382,9 @@ public class SubtractNauseamScript : MonoBehaviour {
 		else
 			QuickLog("You should stay where you are horizontally.");
 		if (offsetDirVert != 0)
-			QuickLog("...Then move {0} step{1} {2}.", Mathf.Abs(offsetDirVert), Mathf.Abs(offsetDirVert) == 1 ? "" : "s", offsetDirVert < 0 ? "up" : "down");
+			QuickLog("...And then move {0} step{1} {2}.", Mathf.Abs(offsetDirVert), Mathf.Abs(offsetDirVert) == 1 ? "" : "s", offsetDirVert < 0 ? "up" : "down");
 		else
-			QuickLog("...Then stay where you are vertically.");
+			QuickLog("...And then stay where you are vertically.");
 		var finalObtainedChars = symbolsGrid[startRowTL + offsetDirVert].Substring(startColTL + offsetDirHoriz, 2) + symbolsGrid[startRowTL + offsetDirVert + 1].Substring(startColTL + offsetDirHoriz, 2);
 		QuickLog("Obtained characters in reading order: {0}", finalObtainedChars.Join(""));
 		//QuickLog("Characters present on the module: {0}", finalObtainedChars.Join(""));
@@ -388,22 +407,29 @@ public class SubtractNauseamScript : MonoBehaviour {
 		if (!modSolved)
 		{
 			modSelf.HandleStrike();
-			if (allResults.Count(a => !a.isSuccessful) >= 2)
+			if (oopsCount >= 2)
 				mAudio.PlaySoundAtTransform("Vom", transform);
+			else
+				oopsCount++;
 		}
 		else
 			mAudio.PlayGameSoundAtTransform(KMSoundOverride.SoundEffect.Strike, transform);
 		hasStarted = false;
-		timerMesh.text = "999";
-		var subResult = new Result(false, timeTaken, curQuestionIdx, expectedSubmissionIdx.ToArray(), curQuestionIdx >= 10 ? currentSubmissionIdx.ToArray() : null);
-		allResults.Add(subResult);
-		curResultHighlightIdx = allResults.Count - 1;
-		for (var x = 0; x < directionsText.Length; x++)
-			directionsText[x].text = "";
-		centerMesh.text = "";
+		StoreResult(false, timeTaken, curQuestionIdx, expectedSubmissionIdx.ToArray(), curQuestionIdx >= 10 ? currentSubmissionIdx.ToArray() : null);
 		GenerateStuff();
 		ShowStatus();
 	}
+	void StoreResult(bool successful, float timeTaken, int questionsAnswered, int[] expectedSubmission, int[] inputtedSubmission)
+    {
+		if (successful || storeAllResults)
+        {
+			var newResult = new Result(successful, timeTaken, questionsAnswered, expectedSubmission, inputtedSubmission);
+			if (allResults.Count + 1 > maxItemsStored)
+				allResults.RemoveAt(0);
+			allResults.Add(newResult);
+		}
+    }
+
 	void HandlePressDuringStatus(int dirIdx)
     {
 		switch (dirIdx)
@@ -442,6 +468,16 @@ public class SubtractNauseamScript : MonoBehaviour {
 	}
 	void ShowStatus()
 	{
+		if (curResultHighlightIdx >= allResults.Count || curResultHighlightIdx < 0)
+        {
+			timerMesh.text = "999";
+			for (var x = 0; x < directionsText.Length; x++)
+				directionsText[x].text = "";
+			centerMesh.text = "";
+			statusMesh.text = "";
+			return;
+		}
+
 		var curResultShown = allResults[curResultHighlightIdx];
 		var timeGrades = new Dictionary<float, string>()
 		{
@@ -592,6 +628,12 @@ public class SubtractNauseamScript : MonoBehaviour {
 		//yield return new WaitForSeconds(0.1f);
 	}
 
+	public class SubtractNauseamSettings
+    {
+		public bool storeSuccessfulResultsOnly = false;
+		public int maxStoredResultsAll = -1;
+    }
+
 #pragma warning disable 414
 	private readonly string BaseTwitchHelpMessage = "\"!{0} U/L/R/D\" [Presses directional button. Presses can be chained when entering the passcode.] \"!{0} prompt enable/disable/on/off/toggle\" [Enables/disables/toggles sending a message to chat for the current prompt.]";
 	private string TwitchHelpMessage = "\"!{0} U/L/R/D\" [Presses directional button. Presses can be chained when entering the passcode.] \"!{0} prompt enable/disable/on/off/toggle\" [Enables/disables/toggles sending a message to chat for the current prompt.]";
@@ -643,7 +685,7 @@ public class SubtractNauseamScript : MonoBehaviour {
 		}
 		if (commandModified.Length > 1 && curQuestionIdx <= 9)
 		{
-			yield return "sendtochaterror Only one answer to a prompt may be sent at a time.";
+			yield return "sendtochaterror Only one answer to a prompt may be sent at a time until you have answered enough questions correctly.";
 			yield break;
 		}
 		if (curQuestionIdx > 9)
