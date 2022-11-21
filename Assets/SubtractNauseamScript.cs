@@ -424,7 +424,7 @@ public class SubtractNauseamScript : MonoBehaviour {
 		if (successful || storeAllResults)
         {
 			var newResult = new Result(successful, timeTaken, questionsAnswered, expectedSubmission, inputtedSubmission);
-			if (allResults.Count + 1 > maxItemsStored)
+			if (allResults.Count + 1 > maxItemsStored && maxItemsStored > 0)
 				allResults.RemoveAt(0);
 			allResults.Add(newResult);
 		}
