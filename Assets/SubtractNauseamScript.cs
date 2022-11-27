@@ -540,7 +540,7 @@ public class SubtractNauseamScript : MonoBehaviour {
 		{
 			directionsText[x].text = selectedCharacters.Substring(directionInputDigits[x], 1);
 		}
-		TrySendMessage("Subtract Nauseum #{1} is showing an empty prompt with the following choices: {0}", Enumerable.Range(0, 4).Select(a => "[" + debugDirections[a].First() + ": " + selectedCharacters[a] + "]").Join(" "), GetModuleCode());
+		TrySendMessage("Subtract Nauseum #{1} is showing an empty prompt with the following choices: {0}", Enumerable.Range(0, 4).Select(a => "[" + debugDirections[a].First() + ": " + selectedCharacters[directionInputDigits[a]] + "]").Join(" "), GetModuleCode());
 	}
 
 	void HandleHighlightAnswer(int idx = -1)
